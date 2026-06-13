@@ -79,7 +79,7 @@ Logic App Trigger
     │
     ├─▶ Azure OpenAI (gpt-4.1-mini): generate restock recommendations
     │
-    └─▶ Gmail: deliver clean recommendations email
+    └─▶ Outlook: deliver clean recommendations email
 ```
 
 ---
@@ -388,7 +388,14 @@ ORDER BY p.CurrentStock ASC;
 
 ![Logic App Parse JSON step with schema targeting choices array message content](assets/logicapp-parse-json.jpg)
 
-5. **Send email (Gmail/Outlook)** — deliver the clean recommendations text
+5. **Office 365 Outlook → Send an email (V2)** — deliver the clean recommendations text
+
+Connect with your Microsoft account. Configure:
+- **To:** your email address
+- **Subject:** `Daily Inventory Restock Recommendations`
+- **Body:** select **Body content** from the Parse JSON step
+
+> ⚠️ If the OAuth token expires during a long session, go to portal → **API connections** → find the Office 365 connection → **Edit API connection** → **Authorize** → sign in again → **Save**. Then return to the Logic App and publish again.
 
 ![Logic App Send email step configured with recipient, subject, and Body content token](assets/logicapp-email-step.jpg)
 
