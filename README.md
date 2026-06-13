@@ -1,24 +1,23 @@
 # 🏪 AI Inventory Tracker
 
-> 📹 **Walkthrough Video:** _[Loom walkthrough coming soon — link will be added here]_
+> 📹 **Walkthrough Video:** [Watch the full walkthrough on Loom](https://www.loom.com/share/801a671b2ca44fe28b73ebd2762fc14a)
 
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-Dane%20Willms-0077B5?style=flat&logo=linkedin)](https://www.linkedin.com/in/dane-willms-3612a9281/)
 [![GitHub](https://img.shields.io/badge/GitHub-Dane139-181717?style=flat&logo=github)](https://github.com/Dane139)
 
-A production-grade, real-time inventory management system built entirely on Azure. Sale events flow through a Service Bus queue into an Azure Function that decrements stock counts the moment a transaction is processed — no batch reconciliation, no manual counts. Every morning, a Logic App pulls 30 days of sales history, sends it to Azure OpenAI, and delivers actionable restock recommendations by email before the workday starts.
+A real-time inventory management system built on Azure. Every sale fires a message into a Service Bus queue. An Azure Function picks it up and updates stock counts in the database immediately. No end-of-day reconciliation, no manual counts. Every morning at 6AM a Logic App pulls 30 days of sales data, sends it to Azure OpenAI, and delivers a restock recommendation email before the workday starts.
 
-All infrastructure is provisioned as code using Terraform.
+All infrastructure is Terraform. 23 resources.
 
 ---
 
 ## The Business Problem
 
-Small retailers and service businesses share a common and expensive problem: inventory decisions made on gut feel instead of data. They either run out of high-demand items at the worst possible moment, or tie up cash in slow-moving stock that sits on shelves.
+Most small businesses lose money on inventory twice. Once when they run out of their best seller at the worst possible moment. Again when slow-moving stock sits on a shelf tying up cash they don't have.
 
-The difference between reactive and predictive is enormous:
+Both problems come from the same root cause: gut feel instead of data.
 
-- **Reactive:** "You are running low on USB-C Hubs."
-- **Predictive:** "Based on your sales over the last 30 days, you will run out of USB-C Hubs in 3 days. Order 7 units from Backup Supplier Inc before Thursday."
+A reactive system says "you are running low on USB-C Hubs." A predictive one says "based on your sales over the last 30 days, you will run out of USB-C Hubs in 3 days. Order 7 units from Backup Supplier Inc before Thursday."
 
 This project builds the predictive version.
 
@@ -86,9 +85,9 @@ Logic App Trigger
 
 ## Why Service Bus?
 
-The naive approach is to have the point-of-sale system call your inventory app directly. The problem: if the app is briefly unavailable (deploying, restarting, scaling), sale events are **lost** — and your stock counts silently drift out of sync.
+The simple approach is to have the point-of-sale system call your inventory app directly. The problem: if the app is briefly unavailable because it's deploying, restarting, or scaling, sale events are lost and your stock counts drift out of sync silently.
 
-Service Bus acts as a durable message buffer. The POS drops a message into the queue and gets immediate confirmation it's safely stored. The Function picks it up when ready — even if that's 30 seconds later. If processing fails, Service Bus retries automatically up to 3 times before moving the message to the dead-letter queue.
+Service Bus sits in the middle as a durable message buffer. The POS drops a message into the queue and gets immediate confirmation it's safely stored. The Function picks it up when ready, even if that's 30 seconds later. If processing fails, Service Bus retries automatically up to 3 times before moving the message to the dead-letter queue for inspection.
 
 This is the pattern real production inventory systems use.
 
@@ -442,13 +441,13 @@ All screenshots are embedded throughout this README at the relevant steps. To se
 
 ## Troubleshooting
 
-This project encountered 13 real infrastructure issues during deployment. All are documented here because they represent genuine production-equivalent problems.
+This project hit 13 real infrastructure issues across multiple deploys. All of them are documented here because they're the kinds of things you only find by actually shipping it.
 
 ### Issue 1 — Resource Group in Deprovisioning State (409 Conflict)
 
 **Symptom:** `ResourceGroupBeingDeleted: The resource group is in deprovisioning state`
 
-**Cause:** A previous `terraform destroy` ran incomplete. Azure locked the resource group while Terraform attempted a new `apply` into it.
+**Cause:** A previous `terraform destroy` ran incomplete. Azure locked the resource group while Terraform tried to apply into it again.
 
 **Fix:**
 ```bash
@@ -463,7 +462,7 @@ terraform apply -auto-approve
 
 **Symptom:** `terraform destroy` returns 404 — resource group not found, but state file still references it.
 
-**Cause:** Resource was deleted outside of Terraform. State file is stale.
+**Cause:** Resource was deleted outside of Terraform. State file still thinks it exists.
 
 **Fix:**
 ```powershell
@@ -478,7 +477,7 @@ terraform apply -auto-approve
 
 **Symptom:** `Requested features 'Dynamic SKU, Linux Worker' not available in resource group`
 
-**Cause:** Central US had capacity restrictions on Linux consumption plans.
+**Cause:** East US had capacity restrictions on Linux consumption plans on this subscription.
 
 **Fix:** Changed `location` in `terraform.tfvars` to `East US`. Requested compute quota increase via portal → Quotas → App Service.
 
@@ -488,7 +487,7 @@ terraform apply -auto-approve
 
 **Symptom:** `ServiceModelDeprecated: The model 'gpt-4o-mini, Version:2024-07-18' has been deprecated since 03/31/2026`
 
-**Cause:** Lab guide was written before March 2026. Model version was hard-removed.
+**Cause:** The lab guide was written before March 2026. The model version was hard-removed by Azure.
 
 **Fix:** Switched to `gpt-4.1-mini` version `2024-10-18` in `main.tf`:
 
@@ -513,7 +512,7 @@ az cognitiveservices model list --location "eastus" \
 
 **Symptom:** `Operation cannot be completed without additional quota. Current Limit (Total VMs): 0`
 
-**Cause:** New Pay-As-You-Go subscriptions have zero compute quota by default in most regions.
+**Cause:** New Pay-As-You-Go subscriptions start with zero compute quota in most regions.
 
 **Fix:** Portal → Quotas → App Service → East US → request increases for:
 - Total Regional vCPUs → 20
@@ -530,7 +529,7 @@ Auto-approved within 15–30 minutes on PAYG accounts.
 
 **Cause:** East US had SQL Server provisioning restricted on this subscription type.
 
-**Fix:** Pinned the SQL Server to West US 2 explicitly in `main.tf`:
+**Fix:** Pin the SQL Server to West US 2 explicitly in `main.tf`:
 
 ```hcl
 resource "azurerm_mssql_server" "main" {
@@ -547,7 +546,7 @@ resource "azurerm_mssql_server" "main" {
 
 **Symptom:** `InvalidResourceLocation: The resource 'sql-inventory-dane' already exists in location 'eastus'. Cannot create in westus2.`
 
-**Cause:** Azure SQL Server names are globally unique and DNS-reserved. Deleting a server doesn't immediately free the name.
+**Cause:** Azure SQL Server names are globally unique and DNS-reserved. Deleting a server doesn't free the name right away.
 
 **Fix:** Renamed the SQL Server resource in `main.tf`:
 ```hcl
@@ -562,7 +561,7 @@ Also update the connection string in the Key Vault secret to match the new FQDN.
 
 **Symptom:** `FlagMustBeSetForRestore: An existing resource has been soft-deleted. Specify 'restore' = true or purge it first.`
 
-**Cause:** Azure Cognitive Services accounts use soft-delete. Terraform `destroy` moves the account to soft-deleted state, not hard-deleted.
+**Cause:** Azure Cognitive Services accounts use soft-delete. Running `terraform destroy` moves the account to a soft-deleted state, not a hard delete. Reapplying tries to create a new account with the same name and hits the conflict.
 
 **Fix (immediate):**
 ```bash
@@ -592,7 +591,7 @@ provider "azurerm" {
 
 **Symptom:** `A resource with this ID already exists — needs to be imported into State`
 
-**Cause:** Secrets were created in a partial apply. State was wiped but secrets remain in Azure.
+**Cause:** Secrets were created in a partial apply. State was wiped but the secrets still exist in Azure, so Terraform tries to create them again and hits a conflict.
 
 **Fix:**
 ```bash
@@ -608,7 +607,7 @@ Repeat for each orphaned secret using the exact version ID from the error messag
 
 **Symptom:** `The binding type(s) 'serviceBusTrigger' are not registered. Please ensure the binding extension is installed.`
 
-**Cause:** Python Function Apps using `function.json` bindings require an extension bundle declaration in `host.json`. Without it, the runtime doesn't know how to load the Service Bus trigger.
+**Cause:** Python Function Apps using `function.json` bindings need an extension bundle declared in `host.json` at the zip root. Without it the runtime doesn't know how to load the Service Bus trigger. The Function starts, looks healthy, and does nothing. No error.
 
 **Fix:** Add `host.json` to the deployment package root:
 
@@ -637,7 +636,7 @@ process_sale/
 
 **Symptom:** `[unixODBC][Driver Manager]Data source name not found and no default driver specified`
 
-**Cause:** `pyodbc` requires the Microsoft ODBC Driver for SQL Server to be installed at the OS level. The Azure Functions Linux runtime does not include it, and `PYTHON_ENABLE_WORKER_EXTENSIONS=1` alone is insufficient.
+**Cause:** `pyodbc` needs the Microsoft ODBC Driver for SQL Server installed at the OS level. The Azure Functions Linux runtime doesn't include it. `PYTHON_ENABLE_WORKER_EXTENSIONS=1` alone doesn't fix it.
 
 **Fix:** Replace `pyodbc` with `pymssql`, which uses its own bundled TDS protocol implementation and requires no system ODBC drivers.
 
@@ -680,7 +679,7 @@ az functionapp deployment source config-zip \
 
 **Symptom:** Service Bus active message count climbing. Function registered but never fires.
 
-**Cause:** The Service Bus listener stops immediately after startup when there's a binding registration failure. The `StopAsync` log entry is the signal.
+**Cause:** The Service Bus listener stops immediately on startup when there's a binding registration failure. The queue fills up and nothing processes. The `StopAsync` log entry in App Insights is the signal to look for.
 
 **Diagnosis:**
 ```bash
@@ -707,7 +706,7 @@ az monitor app-insights query \
 
 ![Clean email showing formatted AI inventory restock recommendations](assets/email-final-clean.jpg)
 
-**Cause:** The HTTP action body token returns the entire JSON response. The actual recommendation text is nested at `choices[0].message.content`.
+**Cause:** The HTTP action body token returns the entire OpenAI API response object. The actual recommendation text is buried at `choices[0].message.content` inside it.
 
 **Fix:** Add a **Parse JSON** step between HTTP and Send Email with this schema:
 
